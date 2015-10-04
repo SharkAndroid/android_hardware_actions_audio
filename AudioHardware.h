@@ -25,14 +25,9 @@
 
 #include <hardware_legacy/AudioHardwareBase.h>
 
-#include "filter_coef.h"
-
 #define SNDRV_SOUTMODE                  0xffff0000
 #define SNDRV_SSPEAKER					0xffff0001
 #define SNDRV_GINUSE                    0xffff0002
-
-#define FILTER_SIZE						4096
-#define SATURATE(x) 	((x)>32767 ? 32767 : ((x)<-32768 ? -32768 : (x)))
 
 enum {
     O_MODE_I2S_2 = 0,
@@ -42,26 +37,6 @@ enum {
     O_MODE_HDMI = 5,
     I_MODE_GENERAL,
 };
-
-enum {
-	NO_FILTER = 0,
-	HIGH_PASS = 1,
-	BAND_PASS = 2,
-};
-
-typedef struct {
-	iir_filter_t *left1;
-	iir_filter_t *left2;
-	iir_filter_t *right1;
-	iir_filter_t *right2;
-} filter_t;
-
-typedef struct {
-    real		*a0;
-    real		*b0;
-    real		*a1;
-    real		*b1;
-} filter_coef_t;
 
 extern "C" {
 #include <linux/soundcard.h>
@@ -99,9 +74,7 @@ public:
     virtual status_t    getRenderPosition(uint32_t *dspFrames);
     virtual status_t    getNextWriteTimestamp(int64_t *timestamp) const { return INVALID_OPERATION; }
             int32_t     getFd();
-            void 		filterInitZero(filter_t *filter);
-            void		filterConfig();
-            
+
 private:
     AudioHardware *mHardware;
     Mutex       mLock;
@@ -114,22 +87,12 @@ private:
     bool 		mEnable;
     int         mOutMode;
     int         mSpeakerOn;
-    int         mFilterOn;
-    int	        mFilterType;
-    filter_coef_t mFilterCoef;
-    filter_t    mFilter;
-    int16_t* 	pout;
-    real* 		poutleft;
-    real* 		poutright;
-    real* 		pinleft;
-    real* 		pinright;
-
 };
 
 class AudioStreamInACTxx : public AudioStreamIn {
 public:
-                        AudioStreamInACTxx();
-    virtual             ~AudioStreamInACTxx();
+    AudioStreamInACTxx();
+    virtual ~AudioStreamInACTxx();
 
     virtual status_t    set(
             AudioHardware *hw,
@@ -174,7 +137,6 @@ public:
     AudioHardware();
     virtual ~AudioHardware();
     virtual status_t    initCheck();
-
 
     virtual status_t    setVoiceVolume(float volume);
     virtual status_t    setMasterVolume(float volume);

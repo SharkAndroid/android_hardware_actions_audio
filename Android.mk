@@ -19,7 +19,6 @@ ifeq ($(strip $(BOARD_USES_ACTIONS_AUDIO)), true)
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
-    filter.cpp \
     AudioHardware.cpp
 
 LOCAL_SHARED_LIBRARIES := libcutils libutils

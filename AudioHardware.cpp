@@ -255,24 +255,10 @@ status_t AudioHardware::dump(int fd, const Vector<String16>& args) {
 // ----------------------------------------------------------------------------
 AudioStreamOutACTxx::AudioStreamOutACTxx() :
 	mHardware(0), mFd(-1), mChannels(AudioSystem::CHANNEL_OUT_STEREO),
-			mDevice(0), mStandby(true), mOutMode(O_MODE_I2S_2), mSpeakerOn(0),
-			mFilterOn(0) {
+			mDevice(0), mStandby(true), mOutMode(O_MODE_I2S_2), mSpeakerOn(0) {
 	/* fragsize = (1 << 11) = 2048, fragnum = 3, about 50ms per dma transfer */
 	mFragShift = 10;
 	mFragNum = 10;
-	
-	filterConfig();
-	
-	if (mFilterType != NO_FILTER) {	
-		pout = (int16_t *) malloc(FILTER_SIZE);
-		poutleft = (real *) malloc(FILTER_SIZE);
-		poutright = (real *) malloc(FILTER_SIZE);
-		pinleft = (real *) malloc(FILTER_SIZE);
-		pinright = (real *) malloc(FILTER_SIZE);	
-		/* TODO: how to free malloc */
-	}
-	ALOGD("use filter type:%d", mFilterType);
-
 }
 
 status_t AudioStreamOutACTxx::set(AudioHardware *hw, uint32_t devices,
@@ -410,65 +396,7 @@ ssize_t AudioStreamOutACTxx::write(const void* buffer, size_t bytes) {
 		if ((bytes & 0x1f) != 0) {
 			ALOGE("write bytes should be burst 8, bytes:%d ", bytes);
 		}
-		
-		if (mFilterType != NO_FILTER) {
-			if (mFilterOn == 1) {
-				int left_val, right_val;
-				
-				if (bytes > FILTER_SIZE) {
-					//ALOGV("=========bytes is too large for filter");
-					/* write FILTER_SIZE bytes at most, considering deal with the malloc buffer */
-					samples = FILTER_SIZE / 4;
-				}
-				/* deinterlearing */
-				for (count = 0; count < samples; count++) {
-					*pinleft++ = (real)(*p++);
-					*pinright++ = (real)(*p++);
-				}
-				
-				pinleft -= samples;
-				pinright -= samples;
-
-				if (mFilterType == BAND_PASS) {
-					iir_filter(mFilter.left1, pinleft, poutleft, mFilterCoef.b0, mFilterCoef.a0, samples);
-					iir_filter(mFilter.left2, poutleft, pinleft, mFilterCoef.b1, mFilterCoef.a1, samples);
-					iir_filter(mFilter.right1, pinright, poutright, mFilterCoef.b0, mFilterCoef.a0, samples);
-					iir_filter(mFilter.right2, poutright, pinright, mFilterCoef.b1, mFilterCoef.a1, samples);
-					/* interlacing */
-					for (count = 0; count < samples; count++) {
-						left_val = *pinleft++;
-						right_val = *pinright++;
-						*pout++ = (int16_t)SATURATE(left_val);
-						*pout++ = (int16_t)SATURATE(right_val);
-					}
-					pinleft -= samples;
-					pinright -= samples;
-				} else {
-					iir_filter(mFilter.left1, pinleft, poutleft, mFilterCoef.b0, mFilterCoef.a0, samples);
-					iir_filter(mFilter.right1, pinright, poutright, mFilterCoef.b0, mFilterCoef.a0, samples);
-					/* interlacing */
-					for (count = 0; count < samples; count++) {
-						left_val = *poutleft++;
-						right_val = *poutright++;
-						*pout++ = (int16_t)SATURATE(left_val);
-						*pout++ = (int16_t)SATURATE(right_val);
-					}
-					poutleft -= samples;
-					poutright -= samples;
-				}
-
-				pout -= samples * 2;
-				
-				/* attention: we just want to pass value of bytes, no releted to type of pout */
-				count = ssize_t(::write(mFd, pout, samples * 4));
-				
-				return count;
-			} else {
-				return ssize_t(::write(mFd, p, bytes));
-			}
-		} else {
-			return ssize_t(::write(mFd, p, bytes));
-		}
+		return ssize_t(::write(mFd, p, bytes));
 	} else {
 		// Simulate audio output timing in case of error
 		usleep(bytes * 1000000 / frameSize() / sampleRate());
@@ -480,10 +408,6 @@ status_t AudioStreamOutACTxx::standby() {
 	if (!mStandby && mFd > 0) {
 		::close(mFd);
 		mFd = -1;
-		
-		if (mFilterType != NO_FILTER) {
-			filterInitZero(&mFilter);
-		}
 	}
 
 	mStandby = true;
@@ -519,154 +443,6 @@ int32_t AudioStreamOutACTxx::getFd() {
 
 	return -1;
 }
-
-static int32_t filterCoef(int filterType, int freqLevel, filter_coef_t *coef) {
-	ALOGD("in func:%s, filterType:%d, freqLevel:%d", __FUNCTION__, filterType, freqLevel);
-	int retVal = 0;
-	switch (filterType) {
-	
-	case NO_FILTER:
-		coef->a0 = NULL;
-		coef->b0 = NULL;
-		coef->a1 = NULL;
-		coef->b1 = NULL;
-		retVal = 0;
-		break;
-		
-	case HIGH_PASS:
-		if ((freqLevel < 0) || (freqLevel > 2)) {
-			retVal = -1;
-		} else {
-			coef->a0 = iir_hp_a[freqLevel];
-			coef->b0 = iir_hp_b[freqLevel];
-			coef->a1 = NULL;
-			coef->b1 = NULL;
-			retVal = 0;
-		}
-		break;
-		
-	case BAND_PASS:
-		if (freqLevel != 0) {
-			retVal = -1;
-		} else {
-			coef->a0 = iir_bp_a0[freqLevel];
-			coef->b0 = iir_bp_b0[freqLevel];
-			coef->a1 = iir_bp_a1[freqLevel];
-			coef->b1 = iir_bp_b1[freqLevel];
-			retVal = 0;
-		}
-		break;
-	
-	default:
-		retVal = -1;
-		break;
-	}
-	
-	return retVal;
-}
-
-static void filterMalloc(int filterType, filter_t *filter) {
-	switch (filterType) {
-	case NO_FILTER:
-		filter->left1 = NULL;
-		filter->right1 = NULL;
-		filter->left2 = NULL;
-		filter->right2 = NULL;
-		break;
-	
-	case HIGH_PASS:
-		filter->left1 = (iir_filter_t *) malloc(sizeof(iir_filter_t));
-		filter->right1 = (iir_filter_t *) malloc(sizeof(iir_filter_t));
-		memset(filter->left1, 0, sizeof(iir_filter_t));
-		memset(filter->right1, 0, sizeof(iir_filter_t));
-		filter->left2 = NULL;
-		filter->right2 = NULL;
-		break;
-	
-	case BAND_PASS:
-		filter->left1 = (iir_filter_t *) malloc(sizeof(iir_filter_t));
-		filter->right1 = (iir_filter_t *) malloc(sizeof(iir_filter_t));
-		memset(filter->left1, 0, sizeof(iir_filter_t));
-		memset(filter->right1, 0, sizeof(iir_filter_t));
-		
-		filter->left2 = (iir_filter_t *) malloc(sizeof(iir_filter_t));
-		filter->right2 = (iir_filter_t *) malloc(sizeof(iir_filter_t));
-		memset(filter->left2, 0, sizeof(iir_filter_t));
-		memset(filter->right2, 0, sizeof(iir_filter_t));
-		break;
-	
-	default:
-		break;
-	}
-}
-
-void AudioStreamOutACTxx::filterInitZero(filter_t *filter) {
-
-	if (filter->left1 != NULL) {
-		memset(filter->left1, 0, sizeof(iir_filter_t));
-	}
-	if (filter->right1 != NULL) {
-		memset(filter->right1, 0, sizeof(iir_filter_t));
-	}
-	if (filter->left2 != NULL) {
-		memset(filter->left2, 0, sizeof(iir_filter_t));
-	}
-	if (filter->right2 != NULL) {
-		memset(filter->right2, 0, sizeof(iir_filter_t));
-	}
-}
-
-void AudioStreamOutACTxx::filterConfig() {
-	char filterType[PROPERTY_VALUE_MAX];
-	char lowFreq[PROPERTY_VALUE_MAX];
-	char highFreq[PROPERTY_VALUE_MAX];
-	int freqLevel = 0;
-	int retVal = 0;
-	property_get("ro.audiohal.filtertype", filterType, "nofilter");
-    ALOGD("value:%s", filterType);
-	if (strncmp(filterType, "bandpass", 8) == 0) {
-		property_get("ro.audiohal.lowfreq", lowFreq, "0");
-		property_get("ro.audiohal.highfreq", highFreq, "0");
-		if ((strncmp(lowFreq, "700", 3) == 0) && 
-			(strncmp(highFreq, "7000", 4) == 0)) {
-			mFilterType = BAND_PASS;
-			freqLevel = 0;
-			ALOGD("use band pass filter");
-		} else {
-			ALOGD("no support cutoff freq:%s ~ %s in band pass filter", lowFreq, highFreq);
-			mFilterType = NO_FILTER;
-		}
-	} else if (strncmp(filterType, "highpass", 8) == 0) {
-		property_get("ro.audiohal.lowfreq", lowFreq, "0");
-		if ((strncmp(lowFreq, "300", 3) == 0)) {
-			mFilterType = HIGH_PASS;
-			freqLevel = 0;
-			ALOGD("use high pass filter, cutoff freq:%s", lowFreq);
-		} else if ((strncmp(lowFreq, "500", 3) == 0)) {
-			mFilterType = HIGH_PASS;
-			freqLevel = 1;
-			ALOGD("use high pass filter, cutoff freq:%s", lowFreq);
-		} else if ((strncmp(lowFreq, "700", 3) == 0)) {
-			mFilterType = HIGH_PASS;
-			freqLevel = 2;
-			ALOGD("use high pass filter, cutoff freq:%s", lowFreq);
-		} else {
-			mFilterType = NO_FILTER;
-			ALOGD("no support cutoff freq:%s in high pass filter", lowFreq);
-		}
-	} else {
-		mFilterType = NO_FILTER;
-		ALOGD("no filter");
-	}
-
-	retVal = filterCoef(mFilterType, freqLevel, &mFilterCoef);
-	if (retVal != 0) {
-		ALOGD("filterCoef fail, no filter");
-		mFilterType = NO_FILTER;
-	}
-	filterMalloc(mFilterType, &mFilter);
-}
-
 
 status_t AudioStreamOutACTxx::dump(int fd, const Vector<String16>& args) {
 	const size_t SIZE = 256;
@@ -709,13 +485,9 @@ status_t AudioStreamOutACTxx::setParameters(const String8& keyValuePairs) {
 		if ((device & AudioSystem::DEVICE_OUT_AUX_DIGITAL) == AudioSystem::DEVICE_OUT_AUX_DIGITAL) {
 			mOutMode = O_MODE_HDMI;
 			mSpeakerOn = 0;
-			mFilterOn = 0;
 		} else if (((device & AudioSystem::DEVICE_OUT_SPEAKER) == AudioSystem::DEVICE_OUT_SPEAKER) && 
 			((device & AudioSystem::DEVICE_OUT_WIRED_HEADPHONE) != AudioSystem::DEVICE_OUT_WIRED_HEADPHONE)) {
 			mOutMode = O_MODE_I2S_2;
-			if (mFilterType != NO_FILTER) {
-				mFilterOn = 1;
-			}
 			if (!mStandby) {
 				mSpeakerOn = 1;
 			} else {
@@ -725,19 +497,11 @@ status_t AudioStreamOutACTxx::setParameters(const String8& keyValuePairs) {
 		} else {
 			mOutMode = O_MODE_I2S_2;
 			mSpeakerOn = 0;
-			mFilterOn = 0;
-		}
-		
-		//mFilterOn = 1; //for debug EQ, open this		
+		}	
 		
 		if (getFd() > 0) {
 			ioctl(mFd, SNDRV_SSPEAKER, &mSpeakerOn);
 			ioctl(mFd, SNDRV_SOUTMODE, &mOutMode);
-		}
-		if (mFilterType != NO_FILTER) {
-			if (mFilterOn == 1) {
-				filterInitZero(&mFilter);
-			}
 		}
 
 		param.remove(key);
