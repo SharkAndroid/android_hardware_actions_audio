@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Audio policy driver for ATM702X
-ifeq ($(strip $(BOARD_USES_ACTIONS_AUDIO)), true)
+ifeq ($(BOARD_HAVE_ACTIONS_AUDIO), true)
 
 LOCAL_PATH := $(call my-dir)
 

@@ -122,7 +122,7 @@ AudioStreamIn* AudioHardware::openInputStream(uint32_t devices, int *format,
 	// support more than one input stream
 	if (mInput) {
 		ALOGD("more than one input");
-//		//only one output stream allowed
+		//only one output stream allowed
 //		if (status) {
 //			*status = INVALID_OPERATION;
 //		}
