@@ -43,8 +43,8 @@ extern "C" {
 }
 
 namespace android_audio_legacy {
-	using android::Mutex;
-	using android::AutoMutex;
+    using android::Mutex;
+    using android::AutoMutex;
 
 class AudioHardware;
 
@@ -98,13 +98,13 @@ public:
     virtual status_t setGain(float gain);
     virtual ssize_t read(void* buffer, ssize_t bytes);
     virtual status_t dump(int fd, const Vector<String16>& args);
-	virtual status_t standby();
+    virtual status_t standby();
     virtual status_t setParameters(const String8& keyValuePairs);
     virtual String8 getParameters(const String8& keys);
     virtual uint32_t getInputFramesLost() const { return 0; }
     virtual status_t addAudioEffect(effect_handle_t effect) { return NO_ERROR; }
     virtual status_t removeAudioEffect(effect_handle_t effect) { return NO_ERROR; }
-			int32_t getFd();
+            int32_t getFd();
 private:
     AudioHardware *mHardware;
     Mutex mLock;
@@ -145,7 +145,7 @@ public:
     virtual void closeInputStream(AudioStreamIn* in);
 
     virtual size_t getInputBufferSize(uint32_t sampleRate, int format, int channelCount);
-    			int32_t    	getFd();
+                int32_t     getFd();
 protected:
     virtual status_t    dump(int fd, const Vector<String16>& args);
 
